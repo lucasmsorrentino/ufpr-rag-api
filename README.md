@@ -213,6 +213,54 @@ Números de matrícula (GRR) **não** são removidos: são identificadores públ
   é a exclusão dos documentos), com validação de dígito verificador para não
   mascarar códigos numéricos legítimos.
 
+### Superfície exposta
+
+O `scripts/harden_security_list.py` foi aplicado: a Security List saiu de 13 para
+6 regras de ingress. Varredura externa das duas VMs depois da mudança:
+
+| Máquina | Portas abertas à internet |
+|---|---|
+| VM do modelo (ARM) | `22` (SSH) e `8501` (outra aplicação, alheia a este projeto) |
+| VM pública (x86) | `22` (SSH) e `8000` (esta aplicação) |
+
+Foram fechadas: `3000` (open-webui), `4000` (proxy de LLM, com chaves),
+`5432` (**PostgreSQL**), `5678` (n8n), `6333`/`6334` (qdrant), `8005`,
+`9443` (**Portainer**). Banco de dados e painel de controle do Docker abertos
+ao mundo são achados sérios por si só — nada disso precisava de acesso externo,
+já que o consumo é todo interno pela rede do Docker.
+
+Um resíduo exigiu atenção separada: a porta `8000` **precisa** continuar aberta
+(é a aplicação), mas o Portainer da outra VM também publicava a 8000 (túnel de
+Edge agent). Fechar pela Security List não resolveria sem derrubar a aplicação,
+então o Portainer foi recriado sem essa publicação e com a `9443` ligada a
+`127.0.0.1` — acessível só por túnel SSH:
+
+```bash
+ssh -L 9443:127.0.0.1:9443 ubuntu@<IP>   # depois: https://localhost:9443
+```
+
+A lição é que **fechar por porta não basta quando dois serviços compartilham o
+número**; é preciso olhar quem escuta em cada máquina.
+
+---
+
+## Testes
+
+```bash
+pip install pytest && pytest -q     # 20 testes, ~0,7 s
+```
+
+Cobrem as defesas, não o caminho feliz: recusa de injeção de SQL nos três
+filtros (incluindo `' OR 1=1 --` e `'; DROP TABLE`), separação entre as
+whitelists (um valor válido para `conselho` não passa como `tipo`),
+mascaramento de CPF com dígito verificador — inclusive o caso do código
+orçamentário que *parece* CPF e não deve ser mascarado, e do GRR que não é PII —
+e o rate limit, tanto o bloqueio da rajada quanto a varredura que impede o
+dicionário de IPs de crescer sem limite.
+
+Rodam sem LanceDB, sem o modelo e sem rede: as dependências pesadas são
+importadas dentro dos métodos, então a lógica de validação é exercitável isolada.
+
 ### Uma armadilha que vale registrar: iptables não fecha porta de container
 
 A tentativa inicial de restringir o acesso foi por `iptables` na cadeia `INPUT`.

@@ -35,5 +35,7 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Backups de regras de rede (mapa de portas — nao publicar)
-seclist_backup_*.json
+# Regras de rede geradas pelo script de hardening — tanto o backup quanto o
+# estado aplicado descrevem quais portas da infra estao abertas. Mapa de
+# ataque: nao publicar. Padrao amplo de proposito, para pegar arquivos novos.
+seclist_*.json

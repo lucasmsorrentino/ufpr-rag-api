@@ -25,6 +25,7 @@ import argparse
 import json
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 # Portas que DEVEM continuar aceitando tráfego da internet.
@@ -71,8 +72,15 @@ def main() -> int:
     dados = _oci(["network", "security-list", "get", "--security-list-id", args.security_list_id])
     regras = dados["data"]["ingress-security-rules"]
 
-    stamp = dados["data"].get("time-created", "backup").replace(":", "").replace("-", "")[:15]
+    # O carimbo vem da hora ATUAL, não de `time-created` da security list: aquele
+    # é constante, então toda execução escreveria no mesmo arquivo e a segunda
+    # rodada sobrescreveria o backup pré-hardening — justamente o que serve de
+    # rollback. Por garantia, nunca sobrescrevemos um backup existente.
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     backup = Path(f"seclist_backup_{stamp}.json")
+    if backup.exists():
+        print(f"ERRO: {backup} já existe; recusando sobrescrever backup.", file=sys.stderr)
+        return 1
     backup.write_text(json.dumps(regras, indent=1), encoding="utf-8")
     print(f"Backup de {len(regras)} regras em {backup}")
 

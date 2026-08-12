@@ -39,14 +39,28 @@ app = FastAPI(
 # --- Rate limit por IP -----------------------------------------------------
 _RATE_MAX = int(os.getenv("RATE_LIMIT_PER_MIN", "15"))
 _WINDOW_S = 60.0
+_SWEEP_S = 300.0  # varredura de IPs ociosos
 _hits: dict[str, deque] = {}
 _hits_lock = Lock()
+_prox_sweep = time.monotonic() + _SWEEP_S
 
 
 def _rate_limit(request: Request) -> None:
+    """Janela deslizante por IP.
+
+    O dicionário é varrido periodicamente: sem isso, cada IP que aparece uma
+    única vez fica residente para sempre, e um scanner de portas basta para
+    fazer o processo crescer sem limite — esta VM tem menos de 1 GB de RAM.
+    """
+    global _prox_sweep
     ip = request.client.host if request.client else "?"
     now = time.monotonic()
     with _hits_lock:
+        if now >= _prox_sweep:
+            for k in [k for k, v in _hits.items() if not v or now - v[-1] > _WINDOW_S]:
+                del _hits[k]
+            _prox_sweep = now + _SWEEP_S
+
         dq = _hits.setdefault(ip, deque())
         while dq and now - dq[0] > _WINDOW_S:
             dq.popleft()
