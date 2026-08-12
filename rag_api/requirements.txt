@@ -1,0 +1,11 @@
+# API
+fastapi==0.120.4
+uvicorn[standard]==0.46.0
+pydantic==2.12.5
+
+# RAG — lancedb pinado no formato que gerou o store (0.30.2)
+lancedb==0.30.2
+sentence-transformers==5.4.1
+# torch: nas VMs ARM/x86 (sem GPU) o wheel do PyPI já é CPU-only
+torch==2.11.0
+numpy==2.4.4

@@ -1,0 +1,36 @@
+# --- Segredos: NUNCA versionar ---
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+
+# --- Material de aula do professor (não republicar) ---
+*.pdf
+
+# --- Vector store / dados / modelos (grandes, vão por scp) ---
+*.lance/
+ufpr.lance/
+store/
+store_publico/
+*.tar
+*.tar.gz
+
+# --- Cache de modelos HuggingFace ---
+hf_cache/
+.cache/
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
