@@ -3,11 +3,6 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Dependências de sistema mínimas (lancedb/torch trazem wheels prontos).
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
 # Instala deps primeiro (camada cacheável).
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -22,7 +17,8 @@ ENV RAG_STORE_DIR=/store \
 
 EXPOSE 8100
 
+# Healthcheck em Python: evita depender de curl (imagem menor, sem apt).
 HEALTHCHECK --interval=30s --timeout=10s --start-period=90s --retries=3 \
-    CMD curl -fsS http://localhost:8100/health || exit 1
+    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8100/health',timeout=8).status==200 else 1)" || exit 1
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8100"]

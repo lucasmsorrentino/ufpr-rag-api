@@ -4,6 +4,8 @@ Sistema de perguntas e respostas sobre normas da UFPR (resoluções, atas, instr
 normativas e regulamentos de estágio), servido como API pública e chatbot, com
 **arquitetura de duas máquinas** na Oracle Cloud.
 
+**▶ Aplicação no ar: <http://167.234.235.90:8000>** · [API](http://167.234.235.90:8000/docs) · [health](http://167.234.235.90:8000/health)
+
 A base tem **35.359 trechos** indexados a partir de ~3.300 documentos públicos,
 com busca semântica (embeddings `multilingual-e5-large` + LanceDB) e síntese por
 LLM com **citação obrigatória da fonte**.
@@ -150,7 +152,10 @@ Números de matrícula (GRR) **não** são removidos: são identificadores públ
 
 ## Segurança
 
-- **A VM do modelo não expõe porta à internet** — bind no IP privado + firewall restrito à VCN.
+- **A VM do modelo não expõe porta à internet** — o container é publicado no IP
+  privado (`-p 10.0.0.78:8100:8100`) e a regra de ingress da porta 8100 tem origem
+  `10.0.0.0/24`, não `0.0.0.0/0`. Verificado por fora: a porta é inalcançável da
+  internet e alcançável apenas pela VM pública.
 - **Sem segredo no repositório** — `NVIDIA_API_KEY` só em `.env` na VM (versionado apenas o `.env.example`).
 - **Filtros validados por whitelist** — os parâmetros `conselho`/`tipo`/`orgao` são
   conferidos contra um conjunto fechado antes de virarem cláusula `WHERE`, então
@@ -162,6 +167,23 @@ Números de matrícula (GRR) **não** são removidos: são identificadores públ
 - **Mascaramento de CPF na saída** como defesa em profundidade (a defesa principal
   é a exclusão dos documentos), com validação de dígito verificador para não
   mascarar códigos numéricos legítimos.
+
+### Uma armadilha que vale registrar: iptables não fecha porta de container
+
+A tentativa inicial de restringir o acesso foi por `iptables` na cadeia `INPUT`.
+**Não funciona para portas publicadas pelo Docker.** Um `-p 8000:8000` é entregue
+por DNAT em `nat/PREROUTING`; como o destino passa a ser o IP do container, o
+pacote é *encaminhado* e percorre a cadeia **FORWARD**, nunca a `INPUT`. Uma
+regra de INPUT ali dá falsa sensação de segurança: a porta continua aberta.
+
+O controle efetivo é a **Security List da VCN** — é o que `scripts/harden_security_list.py`
+ajusta. Diagnóstico usado para provar isso: `tcpdump` na máquina de destino
+enquanto se tentava conectar da outra VM — nenhum pacote chegava, o que descarta
+o firewall do host e aponta para a camada de rede.
+
+Corolário do mesmo mecanismo: com `FORWARD` em política `DROP`, remover todos os
+containers faz o Docker perder suas regras de FORWARD, e portas publicadas param
+de responder mesmo com tudo "aberto". `systemctl restart docker` reconstrói.
 
 ---
 
