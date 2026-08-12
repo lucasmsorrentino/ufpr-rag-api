@@ -20,7 +20,7 @@ Internet ──▶ VM pública (x86)  ──────────────
              :8000                                          :8100
              ├─ chatbot (HTML)                               ├─ FastAPI /buscar /perguntar
              ├─ FastAPI (orquestra)                          ├─ LanceDB (35.359 chunks)
-             └─ NVIDIA NIM (llama-3.3-70b)                   └─ multilingual-e5-large
+             └─ NVIDIA NIM (gpt-oss-120b)                    └─ multilingual-e5-large
                                                              SEM porta aberta à internet
 ```
 
@@ -39,6 +39,51 @@ Fluxo de uma pergunta:
 
 ---
 
+## Dois modos de consulta
+
+O chat tem um seletor, e cada modo corresponde a um endpoint distinto:
+
+| | 🤖 **Resposta com IA** | ⚡ **Busca direta (sem IA)** |
+|---|---|---|
+| Endpoint | `POST /perguntar` | `GET /buscar` |
+| O que devolve | Texto redigido, citando a origem | Os trechos originais, por similaridade |
+| Latência típica | ~7 s | **~1 s** |
+| Depende de serviço externo | Sim (NVIDIA NIM) | Não |
+| Risco de alucinação | Existe (mitigado pelo prompt) | **Nenhum** — nada é reescrito |
+
+A separação não é enfeite: ela isola a recuperação da geração. Se a resposta com
+IA parecer errada, a busca direta mostra exatamente o que o RAG recuperou, o que
+permite distinguir **falha de recuperação** (o trecho certo não foi encontrado)
+de **falha de geração** (o trecho estava lá e o LLM interpretou mal). É a forma
+mais barata de depurar um RAG — e a que continua funcionando se a API do LLM cair.
+
+Ambos os modos passam pelo mesmo mascaramento de CPF na saída.
+
+### Sobre a escolha do modelo
+
+O tier gratuito da NVIDIA não garante latência, e a diferença entre modelos é
+brutal. Medido desta VM, mesmo prompt trivial de 20 tokens:
+
+| Modelo | Tempo |
+|---|---|
+| `meta/llama-3.3-70b-instruct` | **67,1 s** |
+| `meta/llama-3.1-70b-instruct` | 11,5 s |
+| `nvidia/llama-3.3-nemotron-super-49b-v1.5` | 1,4 s (devolveu só raciocínio, sem conteúdo) |
+| `openai/gpt-oss-120b` | **0,7 s** |
+| `meta/llama-3.1-8b-instruct` | 0,6 s |
+
+A primeira versão usava o `llama-3.3-70b` e o chat parecia travado: 67 s de fila
+antes de qualquer byte. Trocado pelo `openai/gpt-oss-120b` — maior modelo entre
+os rápidos, e o que respondeu com citação correta em 7 s sobre contexto real.
+Fica registrado que **medir a fila vale mais que escolher pelo tamanho do modelo**.
+
+Modelos com raciocínio separado (`gpt-oss`, `nemotron`) devolvem `reasoning_content`
+à parte, e às vezes `content: null` quando gastam o orçamento pensando. O cliente
+só entrega o `content` ao usuário e trata resposta vazia como falha, caindo para o
+`llama-3.1-8b`.
+
+---
+
 ## Endpoints
 
 ### API pública (VM x86, porta 8000)
@@ -47,8 +92,8 @@ Fluxo de uma pergunta:
 |---|---|---|
 | `GET` | `/` | Interface de chat |
 | `GET` | `/health` | Status do front, do RAG upstream e do LLM |
-| `POST` | `/perguntar` | `{pergunta, top_k}` → resposta em linguagem natural + fontes |
-| `GET` | `/buscar?q=&top_k=` | Busca bruta, sem LLM |
+| `POST` | `/perguntar` | `{pergunta, top_k}` → resposta em linguagem natural + fontes (**com LLM**) |
+| `GET` | `/buscar?q=&top_k=` | Trechos originais por similaridade (**sem LLM**) |
 | `GET` | `/docs` | OpenAPI interativo |
 
 ```bash
@@ -190,7 +235,7 @@ de responder mesmo com tudo "aberto". `systemctl restart docker` reconstrói.
 ## Stack
 
 Python 3.11 · FastAPI · LanceDB · sentence-transformers (`intfloat/multilingual-e5-large`) ·
-NVIDIA NIM (`meta/llama-3.3-70b-instruct`, fallback `meta/llama-3.1-8b-instruct`) ·
+NVIDIA NIM (`openai/gpt-oss-120b`, fallback `meta/llama-3.1-8b-instruct`) ·
 Docker · Oracle Cloud (Always Free)
 
 Fonte dos documentos: [soc.ufpr.br](https://soc.ufpr.br) e portais institucionais da UFPR.

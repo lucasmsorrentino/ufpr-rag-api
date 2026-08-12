@@ -1,8 +1,21 @@
 """Cliente da API gratuita da NVIDIA (NIM), compatível com OpenAI.
 
-Modelo principal: `meta/llama-3.3-70b-instruct`. Ele pode levar mais de 60 s
-para responder na primeira chamada do dia (cold start do NIM), então há
-fallback automático para o `meta/llama-3.1-8b-instruct`, que responde de imediato.
+Escolha do modelo
+-----------------
+O tier gratuito da NVIDIA não garante latência: cada modelo tem sua própria
+fila. Medido nesta VM, com o mesmo prompt trivial:
+
+    meta/llama-3.3-70b-instruct                 67,1 s
+    meta/llama-3.1-70b-instruct                 11,5 s
+    nvidia/llama-3.3-nemotron-super-49b-v1.5     1,4 s  (só devolve raciocínio)
+    openai/gpt-oss-120b                          0,7 s
+    meta/llama-3.1-8b-instruct                   0,6 s
+
+Daí o principal ser o `openai/gpt-oss-120b`: é o maior entre os rápidos e
+respondeu com citação correta em 7 s sobre contexto real do RAG. O 70b da Meta
+foi abandonado — 67 s é tempo de o usuário fechar a aba.
+
+O fallback para o `8b` cobre indisponibilidade momentânea do principal.
 """
 
 from __future__ import annotations
@@ -12,9 +25,9 @@ import os
 import httpx
 
 NVIDIA_BASE_URL = os.getenv("NVIDIA_BASE_URL", "https://integrate.api.nvidia.com/v1")
-MODELO_PRINCIPAL = os.getenv("LLM_MODEL", "meta/llama-3.3-70b-instruct")
+MODELO_PRINCIPAL = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 MODELO_FALLBACK = os.getenv("LLM_MODEL_FALLBACK", "meta/llama-3.1-8b-instruct")
-TIMEOUT_S = float(os.getenv("LLM_TIMEOUT", "120"))
+TIMEOUT_S = float(os.getenv("LLM_TIMEOUT", "45"))
 
 SYSTEM_PROMPT = """Você é um assistente que responde perguntas sobre normas e \
 documentos institucionais da UFPR (resoluções, atas, instruções normativas e \
@@ -36,6 +49,10 @@ class LLMIndisponivel(RuntimeError):
     """Falha ao obter resposta do provedor."""
 
 
+class RespostaVazia(RuntimeError):
+    """O modelo devolveu só raciocínio, sem conteúdo utilizável."""
+
+
 def _chamar(modelo: str, mensagens: list[dict], api_key: str, timeout: float) -> str:
     resp = httpx.post(
         f"{NVIDIA_BASE_URL}/chat/completions",
@@ -49,7 +66,14 @@ def _chamar(modelo: str, mensagens: list[dict], api_key: str, timeout: float) ->
         timeout=timeout,
     )
     resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
+    msg = resp.json()["choices"][0]["message"]
+    # Modelos com raciocínio (gpt-oss, nemotron) preenchem `reasoning_content`
+    # separado. Só o `content` vai para o usuário — e alguns devolvem `null` ali
+    # quando gastam todo o orçamento pensando; nesse caso, cai para o fallback.
+    conteudo = (msg.get("content") or "").strip()
+    if not conteudo:
+        raise RespostaVazia(f"{modelo} não devolveu conteúdo.")
+    return conteudo
 
 
 def responder(pergunta: str, contexto: str) -> tuple[str, str]:
@@ -69,10 +93,10 @@ def responder(pergunta: str, contexto: str) -> tuple[str, str]:
 
     try:
         return _chamar(MODELO_PRINCIPAL, mensagens, api_key, TIMEOUT_S), MODELO_PRINCIPAL
-    except (httpx.TimeoutException, httpx.HTTPStatusError) as exc:
-        # Cold start do NIM ou indisponibilidade momentânea -> cai para o 8b.
+    except (httpx.TimeoutException, httpx.HTTPStatusError, RespostaVazia) as exc:
+        # Fila do NIM, indisponibilidade momentânea ou resposta vazia -> 8b.
         try:
-            return _chamar(MODELO_FALLBACK, mensagens, api_key, 60.0), MODELO_FALLBACK
+            return _chamar(MODELO_FALLBACK, mensagens, api_key, 30.0), MODELO_FALLBACK
         except Exception as exc2:
             raise LLMIndisponivel(
                 f"Falha no modelo principal ({type(exc).__name__}) e no fallback ({exc2})."

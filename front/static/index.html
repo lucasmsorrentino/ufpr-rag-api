@@ -41,6 +41,24 @@
   .hint{margin-top:12px;font-size:.82rem;color:var(--muted)}
   .hint code{background:var(--src-bg);padding:1px 5px;border-radius:4px}
   .erro{border-color:#c0392b}
+
+  /* Seletor de modo: com LLM (resposta sintetizada) x sem LLM (busca crua) */
+  .modos{display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap}
+  .modos label{flex:1;min-width:230px;display:flex;gap:10px;align-items:flex-start;
+               padding:10px 12px;border:1px solid var(--border);border-radius:9px;
+               background:var(--panel);cursor:pointer}
+  .modos input{margin-top:3px;accent-color:var(--accent)}
+  .modos label:has(input:checked){border-color:var(--accent);
+               box-shadow:inset 0 0 0 1px var(--accent)}
+  .modos .t{font-weight:600;font-size:.92rem}
+  .modos .d{display:block;font-weight:400;font-size:.78rem;color:var(--muted);margin-top:2px}
+
+  /* Resultados do modo busca direta */
+  .trecho{border:1px solid var(--border);border-radius:8px;padding:10px 12px;
+          margin-top:10px;background:var(--src-bg)}
+  .trecho .cab{font-size:.76rem;color:var(--muted);margin-bottom:6px;overflow-wrap:anywhere}
+  .trecho .cab b{color:var(--fg)}
+  .trecho .txt{font-size:.88rem;white-space:pre-wrap;overflow-wrap:anywhere}
 </style>
 </head>
 <body>
@@ -51,6 +69,21 @@
        e regulamentos de estágio da UFPR. As respostas citam o documento de origem.</p>
   </header>
 
+  <div class="modos">
+    <label>
+      <input type="radio" name="modo" value="llm" checked>
+      <span><span class="t">🤖 Resposta com IA</span>
+        <span class="d">Um LLM lê os trechos recuperados e redige a resposta, citando a
+          origem. Mais legível; depende de um serviço externo.</span></span>
+    </label>
+    <label>
+      <input type="radio" name="modo" value="busca">
+      <span><span class="t">⚡ Busca direta (sem IA)</span>
+        <span class="d">Devolve os trechos originais dos documentos, por similaridade.
+          Sem intermediário: nada é reescrito, logo não há alucinação.</span></span>
+    </label>
+  </div>
+
   <div id="chat"></div>
 
   <form id="form">
@@ -60,8 +93,8 @@
   </form>
 
   <p class="hint">
-    API: <code>POST /perguntar</code> · <code>GET /buscar?q=</code> · <code>GET /health</code>
-    — documentação interativa em <a href="/docs">/docs</a>.
+    API: <code>POST /perguntar</code> (com IA) · <code>GET /buscar?q=</code> (sem IA) ·
+    <code>GET /health</code> — documentação interativa em <a href="/docs">/docs</a>.
   </p>
 </div>
 
@@ -80,44 +113,110 @@ function add(role, text, cls){
   return d;
 }
 
+const modoAtual = () => document.querySelector('input[name=modo]:checked').value;
+
+// O botão e o placeholder acompanham o modo escolhido.
+document.querySelectorAll('input[name=modo]').forEach(r => {
+  r.addEventListener('change', () => {
+    const llm = modoAtual() === 'llm';
+    btn.textContent = llm ? 'Perguntar' : 'Buscar';
+    input.placeholder = llm
+      ? 'Ex: qual o prazo máximo de um estágio obrigatório?'
+      : 'Ex: carga horária estágio obrigatório';
+    input.focus();
+  });
+});
+
+/** Mostra o tempo correndo: sem isso, uma espera de segundos parece travamento. */
+function cronometro(el, prefixo){
+  const t0 = performance.now();
+  const tick = () => { el.textContent = `${prefixo} ${((performance.now()-t0)/1000).toFixed(1)}s`; };
+  tick();
+  const id = setInterval(tick, 100);
+  return () => { clearInterval(id); return (performance.now()-t0)/1000; };
+}
+
+/** Modo com IA: resposta redigida + lista das fontes usadas. */
+function renderLLM(pend, data, seg){
+  pend.querySelector('.body').textContent = data.resposta;
+  if(data.fontes && data.fontes.length){
+    const f = document.createElement('div');
+    f.className = 'fontes';
+    f.innerHTML = '<strong>Fontes consultadas:</strong>';
+    const ul = document.createElement('ul');
+    data.fontes.forEach(x => {
+      const li = document.createElement('li');
+      li.textContent = `${x.documento} — ${x.orgao_emissor}`;
+      ul.append(li);
+    });
+    f.append(ul); pend.append(f);
+  }
+  const m = document.createElement('div');
+  m.className = 'meta';
+  m.textContent = `modelo: ${data.modelo} · ${seg.toFixed(1)}s`;
+  pend.append(m);
+}
+
+/** Modo sem IA: os trechos originais, na ordem de similaridade. */
+function renderBusca(pend, data, seg){
+  const n = (data.fontes || []).length;
+  pend.querySelector('.body').textContent = n
+    ? `${n} trecho(s) recuperado(s) diretamente dos documentos, sem intermediação de IA:`
+    : 'Nenhum trecho relevante encontrado na base.';
+  (data.fontes || []).forEach((x, i) => {
+    const d = document.createElement('div');
+    d.className = 'trecho';
+    const cab = document.createElement('div');
+    cab.className = 'cab';
+    cab.innerHTML = `${i+1}. <b>${escapar(x.documento)}</b> — ${escapar(x.orgao_emissor || '?')}`
+                  + ` · similaridade ${x.score}`;
+    const txt = document.createElement('div');
+    txt.className = 'txt'; txt.textContent = x.texto || '';
+    d.append(cab, txt); pend.append(d);
+  });
+  const m = document.createElement('div');
+  m.className = 'meta';
+  m.textContent = `busca vetorial, sem LLM · ${seg.toFixed(1)}s`;
+  pend.append(m);
+}
+
+const escapar = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const pergunta = input.value.trim();
   if(!pergunta) return;
+  const modo = modoAtual();
   add('Você', pergunta);
   input.value = '';
   btn.disabled = true;
-  const pend = add('Assistente', 'Consultando os documentos…');
+  const pend = add('Assistente', '');
+  const parar = cronometro(
+    pend.querySelector('.body'),
+    modo === 'llm' ? 'Consultando os documentos e redigindo…' : 'Buscando nos documentos…'
+  );
 
   try{
-    const resp = await fetch('/perguntar', {
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({pergunta, top_k: 5})
-    });
+    const resp = modo === 'llm'
+      ? await fetch('/perguntar', {
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({pergunta, top_k: 5})
+        })
+      : await fetch('/buscar?q=' + encodeURIComponent(pergunta) + '&top_k=5');
     const data = await resp.json();
+    const seg = parar();
     if(!resp.ok){
       pend.querySelector('.body').textContent = 'Erro: ' + (data.detail || resp.status);
       pend.classList.add('erro');
+    } else if(modo === 'llm'){
+      renderLLM(pend, data, seg);
     } else {
-      pend.querySelector('.body').textContent = data.resposta;
-      if(data.fontes && data.fontes.length){
-        const f = document.createElement('div');
-        f.className = 'fontes';
-        f.innerHTML = '<strong>Fontes consultadas:</strong>';
-        const ul = document.createElement('ul');
-        data.fontes.forEach(x => {
-          const li = document.createElement('li');
-          li.textContent = `${x.documento} — ${x.orgao_emissor}`;
-          ul.append(li);
-        });
-        f.append(ul); pend.append(f);
-      }
-      const m = document.createElement('div');
-      m.className = 'meta'; m.textContent = 'modelo: ' + data.modelo;
-      pend.append(m);
+      renderBusca(pend, data, seg);
     }
   }catch(err){
+    parar();
     pend.querySelector('.body').textContent = 'Falha de rede: ' + err.message;
     pend.classList.add('erro');
   }finally{
