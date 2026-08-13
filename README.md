@@ -107,6 +107,80 @@ só entrega o `content` ao usuário e trata resposta vazia como falha, caindo pa
 
 ---
 
+## A base: de onde vem, e o que ela não resolve sozinha
+
+Os documentos vêm do [SOC](https://soc.ufpr.br) — o repositório de atos oficiais
+da UFPR — e de portais institucionais. O acervo foi montado em 30/04/2026 e
+alcança **fevereiro de 2026** (as atas mais recentes são das sessões de 19 e 24
+de fevereiro), com o volume concentrado entre 2007 e 2025.
+
+São quatro conselhos superiores, mais material de apoio (contagem do store
+publicado, já sem os 9 documentos retirados no filtro de dados pessoais):
+
+| Origem | Documentos |
+|---|---|
+| CEPE — Conselho de Ensino, Pesquisa e Extensão | 1.379 |
+| COPLAD — Conselho de Planejamento e Administração | 1.105 |
+| COUN — Conselho Universitário | 653 |
+| CONCUR — Conselho de Curadores | 151 |
+| POPs do SEI, UFPR Aberta, estágio, curso de Design Gráfico | 120 |
+| **Total** | **3.408** |
+
+### A limitação conhecida: as fontes se sobrepõem
+
+Este acervo é de documento normativo burocrático emitido por **instâncias
+deliberativas distintas** — e é aí que mora o problema. Uma mesma matéria
+aparece, ao longo dos anos, numa resolução do CEPE, numa portaria que a
+retifica, numa resolução do COPLAD que a altera, numa consolidação posterior, e
+numa outra resolução que revoga tudo. Os textos são quase iguais entre si; o que
+muda é *qual está valendo*.
+
+Isso corrói as duas pontas do RAG:
+
+- **Na recuperação.** A busca vetorial ordena por semelhança de significado — e
+  documentos que se sobrepõem são, por construção, semanticamente quase
+  idênticos. O `top_k` tende a encher de variantes da mesma norma em épocas
+  diferentes, gastando as vagas que deveriam trazer contexto novo.
+- **Na resposta.** O trecho de uma norma revogada não diz que foi revogada. Essa
+  informação está em *outro* documento. Um agente que só enxerga o trecho pode
+  citar com segurança uma regra que não vale mais — e citar a fonte corretamente,
+  o que torna o erro mais convincente, não menos.
+
+Nenhum dos dois se resolve com embedding melhor ou `top_k` maior: **vigência não
+é uma propriedade do texto, é uma relação entre documentos.** Busca por
+similaridade não representa relação.
+
+### Por isso este store é metade de um sistema
+
+Esta base foi construída para operar junto de um **banco de dados orientado a
+grafos** (Neo4j), e é assim que ela é usada no projeto de automação de onde veio.
+O grafo carrega o que o vetor não representa — 1.758 nós e 2.323 relações, entre
+elas:
+
+| Relação | Ocorrências | Para que serve |
+|---|---|---|
+| `EMITIDA_POR` | 1.456 | de qual instância deliberativa a norma saiu |
+| `ALTERA` | 299 | o que foi modificado, e por quem |
+| `CONSOLIDADA_EM` | 193 | onde a redação atual foi reunida |
+| `REVOGA` | 148 | **o que deixou de valer** |
+| `TEM_ETAPA` / `EXECUTADA_POR` / `TRAMITA_VIA` | 114 | como a norma virou processo de fato |
+| `SUBORDINADO_A` | 20 | a hierarquia entre os órgãos |
+
+A divisão de trabalho é essa: o **vetor encontra** o texto que fala do assunto; o
+**grafo decide** qual daqueles textos ainda vale, quem tinha competência para
+emitir, e como aquilo foi efetivamente implantado na instituição. Perguntas de
+vigência (*"esta regra está valendo?"*) e de histórico (*"o que mudou desde
+2019?"*) são consultas de caminho no grafo, não de similaridade.
+
+> **O que esta API expõe é só a metade vetorial.** O grafo faz parte do projeto
+> maior, privado, e não é publicado aqui. Quem consultar este serviço está vendo
+> a recuperação semântica isolada — inclusive com a limitação descrita acima
+> visível. É a razão de existir o modo **busca direta**: ele mostra sem
+> intermediação o que o índice devolveu, e a sobreposição das fontes aparece
+> escancarada na lista de trechos.
+
+---
+
 ## Endpoints
 
 ### API pública (VM x86, via Funnel em HTTPS)
