@@ -77,8 +77,8 @@ O chat tem um seletor, e cada modo corresponde a um endpoint distinto:
 A separação não é enfeite: ela isola a recuperação da geração. Se a resposta com
 IA parecer errada, a busca direta mostra exatamente o que o RAG recuperou, o que
 permite distinguir **falha de recuperação** (o trecho certo não foi encontrado)
-de **falha de geração** (o trecho estava lá e o LLM interpretou mal). É a forma
-mais barata de depurar um RAG — e a que continua funcionando se a API do LLM cair.
+de **falha de geração** (o trecho estava lá e o LLM interpretou mal). Forma
+de barata de depurar um RAG — e a que continua funcionando se a API do LLM cair.
 
 Ambos os modos passam pelo mesmo mascaramento de CPF na saída.
 
@@ -95,15 +95,6 @@ brutal. Medido desta VM, mesmo prompt trivial de 20 tokens:
 | `openai/gpt-oss-120b` | **0,7 s** |
 | `meta/llama-3.1-8b-instruct` | 0,6 s |
 
-A primeira versão usava o `llama-3.3-70b` e o chat parecia travado: 67 s de fila
-antes de qualquer byte. Trocado pelo `openai/gpt-oss-120b` — maior modelo entre
-os rápidos, e o que respondeu com citação correta em 7 s sobre contexto real.
-Fica registrado que **medir a fila vale mais que escolher pelo tamanho do modelo**.
-
-Modelos com raciocínio separado (`gpt-oss`, `nemotron`) devolvem `reasoning_content`
-à parte, e às vezes `content: null` quando gastam o orçamento pensando. O cliente
-só entrega o `content` ao usuário e trata resposta vazia como falha, caindo para o
-`llama-3.1-8b`.
 
 ---
 
@@ -153,9 +144,9 @@ similaridade não representa relação.
 ### Por isso este store é metade de um sistema
 
 Esta base foi construída para operar junto de um **banco de dados orientado a
-grafos** (Neo4j), e é assim que ela é usada no projeto de automação de onde veio.
-O grafo carrega o que o vetor não representa — 1.758 nós e 2.323 relações, entre
-elas:
+grafos** (Neo4j), em meu projeto pessoal de automação com agentes.
+O grafo, ainda em construção, pretende carregar o que o vetor não representa 
+— 1.758 nós e 2.323 relações, entre elas:
 
 | Relação | Ocorrências | Para que serve |
 |---|---|---|
@@ -175,7 +166,7 @@ vigência (*"esta regra está valendo?"*) e de histórico (*"o que mudou desde
 > **O que esta API expõe é só a metade vetorial.** O grafo faz parte do projeto
 > maior, privado, e não é publicado aqui. Quem consultar este serviço está vendo
 > a recuperação semântica isolada — inclusive com a limitação descrita acima
-> visível. É a razão de existir o modo **busca direta**: ele mostra sem
+> visível. Por isso também o modo de  **busca direta**: ele mostra sem
 > intermediação o que o índice devolveu, e a sobreposição das fontes aparece
 > escancarada na lista de trechos.
 
@@ -213,7 +204,8 @@ Filtros aceitos (validados contra whitelist):
 
 ---
 
-## Rodando localmente
+## Rodando localmente (originalmente usei conda, supostamente, é mais recomendado, mas não anotei
+os comandos em conda)
 
 ```bash
 python -m venv .venv && . .venv/Scripts/activate   # Linux/macOS: source .venv/bin/activate
@@ -291,7 +283,7 @@ O script reconstrói uma tabela nova contendo apenas os registros que ficam —
 em vez de `DELETE` sobre uma cópia, porque o delete do LanceDB é *soft* e as
 linhas removidas poderiam permanecer em fragmentos antigos. Ele remove os 9
 documentos de exemplo de estágio que continham dados pessoais reais (CPF, RG,
-nome, data de nascimento) e **valida que nenhum CPF válido restou** — falha o
+nome, data de nascimento, que vieram de documentos ingeridos por engano) e **valida que nenhum CPF válido restou** — falha o
 build se restar. Nenhum conteúdo normativo é perdido.
 
 Números de matrícula (GRR) **não** são removidos: são identificadores públicos da UFPR.
