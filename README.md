@@ -4,7 +4,7 @@ Sistema de perguntas e respostas sobre normas da UFPR (resoluções, atas, instr
 normativas e regulamentos de estágio), servido como API pública e chatbot, com
 **arquitetura de duas máquinas** na Oracle Cloud.
 
-**▶ Aplicação no ar: <http://167.234.235.90:8000>** · [API](http://167.234.235.90:8000/docs) · [health](http://167.234.235.90:8000/health)
+**▶ Aplicação no ar: <http://146.235.48.69:8000>** · [API](http://146.235.48.69:8000/docs) · [health](http://146.235.48.69:8000/health)
 
 A base tem **35.359 trechos** indexados a partir de ~3.300 documentos públicos,
 com busca semântica (embeddings `multilingual-e5-large` + LanceDB) e síntese por
