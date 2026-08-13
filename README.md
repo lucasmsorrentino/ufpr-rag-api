@@ -6,9 +6,30 @@ normativas e regulamentos de estágio), servido como API pública e chatbot, com
 
 **▶ Aplicação no ar: <https://ufpr-rag.tail9f5159.ts.net>** · [API](https://ufpr-rag.tail9f5159.ts.net/docs) · [health](https://ufpr-rag.tail9f5159.ts.net/health)
 
-A base tem **35.359 trechos** indexados a partir de ~3.300 documentos públicos,
+A base tem **35.359 trechos** indexados a partir de ~3.400 documentos públicos,
 com busca semântica (embeddings `multilingual-e5-large` + LanceDB) e síntese por
 LLM com **citação obrigatória da fonte**.
+
+## Os dois trabalhos da disciplina
+
+Este é o **projeto final** da disciplina Deploy e Projeto Final (Especialização
+em IA Generativa — UFPR, prof. Paulo Lisboa de Almeida). A aula gerou duas
+entregas, em repositórios separados porque são projetos de tamanho e propósito
+diferentes:
+
+| | Repositório | O que é |
+|---|---|---|
+| **Projeto final** | **`ufpr-rag-api`** (este) | Busca semântica nos documentos institucionais da UFPR, na arquitetura de **duas máquinas** sugerida na aula. |
+| **Exercício guiado** | [`genaiufpr-fastapi`](https://github.com/lucasmsorrentino/genaiufpr-fastapi) | A API de temperatura por cidade construída passo a passo durante a aula, consumindo a open-meteo. |
+
+Aplicações no ar:
+
+- **RAG (este repo):** <https://ufpr-rag.tail9f5159.ts.net>
+- **Clima (exercício guiado):** <https://ufpr-rag.tail9f5159.ts.net:8443/docs>
+
+As duas rodam na mesma VM e dividem o nome de host — o endereço é o nome da
+máquina na rede Tailscale, não o nome da aplicação. O que separa é a porta:
+`443` para o RAG, `8443` para o clima.
 
 ---
 
@@ -213,8 +234,9 @@ Números de matrícula (GRR) **não** são removidos: são identificadores públ
 - **Filtros validados por whitelist** — os parâmetros `conselho`/`tipo`/`orgao` são
   conferidos contra um conjunto fechado antes de virarem cláusula `WHERE`, então
   entrada do usuário nunca é interpolada em SQL.
-- **Rate limit por IP** nas duas camadas — cada consulta roda um modelo de embeddings
-  numa VM de 2 OCPU; sem limite, uma rajada trivial derrubaria o serviço.
+- **Rate limit** nas duas camadas — cada consulta roda um modelo de embeddings
+  numa VM de 2 OCPU; sem limite, uma rajada trivial derrubaria o serviço. Note
+  que ele é **global**, não por visitante, pelo motivo medido abaixo.
 - **Teto de `top_k`** para limitar custo por requisição.
 - **Erros do upstream não vazam** endereço interno para o cliente.
 - **Mascaramento de CPF na saída** como defesa em profundidade (a defesa principal
@@ -241,6 +263,27 @@ Essa decisão troca uma porta aberta com TLS por **nenhuma porta aberta**. A
 contrapartida honesta é uma dependência de terceiro: se o serviço da Tailscale
 sair do ar, a aplicação fica inacessível. Para um trabalho de disciplina, com
 `Always Free` dos dois lados, o ganho de superfície compensa.
+
+#### O preço: não dá para saber quem está do outro lado
+
+A intenção era limitar as consultas **por visitante**. Medindo, não dá — por
+duas camadas que só aparecem fora do `localhost`:
+
+1. **O Docker esconde o par da conexão.** O container é publicado em
+   `127.0.0.1:8000`, mas dentro dele a origem aparece como `172.17.0.1`, o
+   gateway da bridge: o pacote sofre NAT antes de entrar. Uma verificação do
+   tipo `if ip == "127.0.0.1"` nunca é verdadeira ali dentro.
+2. **O Funnel não preserva o IP do visitante.** O `X-Forwarded-For` chega com o
+   endereço do relay de entrada da Tailscale — um `100.x` constante, diferente
+   do IP da própria VM no tailnet. Chamadas de origens distintas produzem o
+   mesmo valor.
+
+Então o limite é global: protege a VM e a cota da NVIDIA contra um laço
+descontrolado, mas não isola um abusador dos demais — e por isso o teto é
+folgado, já que apertá-lo derrubaria os outros junto sem conter o abusador.
+O cabeçalho continua sendo lido porque é o comportamento correto atrás de um
+proxy que preserve o IP, e é aceito apenas quando o par da conexão não é
+roteável na internet, de modo que não pode ser forjado de fora.
 
 ### Superfície exposta
 
@@ -277,7 +320,7 @@ número**; é preciso olhar quem escuta em cada máquina.
 ## Testes
 
 ```bash
-pip install pytest && pytest -q     # 20 testes, ~0,7 s
+pip install pytest && pytest -q     # 22 testes, ~0,3 s
 ```
 
 Cobrem as defesas, não o caminho feliz: recusa de injeção de SQL nos três
@@ -285,8 +328,10 @@ filtros (incluindo `' OR 1=1 --` e `'; DROP TABLE`), separação entre as
 whitelists (um valor válido para `conselho` não passa como `tipo`),
 mascaramento de CPF com dígito verificador — inclusive o caso do código
 orçamentário que *parece* CPF e não deve ser mascarado, e do GRR que não é PII —
-e o rate limit, tanto o bloqueio da rajada quanto a varredura que impede o
-dicionário de IPs de crescer sem limite.
+e o rate limit: o bloqueio da rajada, a varredura que impede o dicionário de
+chaves de crescer sem limite, e as duas metades da identificação do cliente (o
+`X-Forwarded-For` é aceito vindo da bridge do Docker e ignorado quando o par da
+conexão é um endereço da internet, que poderia forjá-lo).
 
 Rodam sem LanceDB, sem o modelo e sem rede: as dependências pesadas são
 importadas dentro dos métodos, então a lógica de validação é exercitável isolada.

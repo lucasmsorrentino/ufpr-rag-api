@@ -106,10 +106,11 @@ def test_texto_vazio_e_none_nao_quebram():
 
 
 class _Req:
-    """Request mínimo: o limitador só usa `request.client.host`."""
+    """Request mínimo: o limitador usa `request.client.host` e os cabeçalhos."""
 
-    def __init__(self, host):
+    def __init__(self, host, headers=None):
         self.client = type("C", (), {"host": host})()
+        self.headers = headers or {}
 
 
 def _carregar_front():
@@ -130,6 +131,29 @@ def test_rate_limit_bloqueia_rajada():
     with pytest.raises(HTTPException) as exc:
         fm._rate_limit(req)
     assert exc.value.status_code == 429
+
+
+def test_xff_e_aceito_quando_vem_de_proxy_local():
+    """Dentro do container o par é o gateway da bridge do Docker, não o cliente.
+
+    Sem confiar no cabeçalho nesse caso, toda requisição pública viraria a mesma
+    chave `172.17.0.1` e nem o pouco que dá para distinguir seria distinguido.
+    """
+    fm = _carregar_front()
+    req = _Req("172.17.0.1", {"x-forwarded-for": "203.0.113.9, 70.41.3.18"})
+    assert fm._ip_do_cliente(req) == "203.0.113.9"
+
+
+def test_xff_e_ignorado_quando_o_par_vem_da_internet():
+    """Cabeçalho forjado não pode virar chave do limite.
+
+    Se o par não for um proxy local, quem conecta é o próprio cliente — e um
+    cliente que escolhe o próprio `X-Forwarded-For` escaparia do limite trocando
+    o valor a cada requisição.
+    """
+    fm = _carregar_front()
+    req = _Req("8.8.4.4", {"x-forwarded-for": "1.2.3.4"})
+    assert fm._ip_do_cliente(req) == "8.8.4.4"
 
 
 def test_ips_ociosos_sao_removidos_da_memoria():
