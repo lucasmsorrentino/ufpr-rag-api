@@ -4,7 +4,7 @@ Sistema de perguntas e respostas sobre normas da UFPR (resoluções, atas, instr
 normativas e regulamentos de estágio), servido como API pública e chatbot, com
 **arquitetura de duas máquinas** na Oracle Cloud.
 
-**▶ Aplicação no ar: <http://146.235.48.69:8000>** · [API](http://146.235.48.69:8000/docs) · [health](http://146.235.48.69:8000/health)
+**▶ Aplicação no ar: <https://ufpr-rag.tail9f5159.ts.net>** · [API](https://ufpr-rag.tail9f5159.ts.net/docs) · [health](https://ufpr-rag.tail9f5159.ts.net/health)
 
 A base tem **35.359 trechos** indexados a partir de ~3.300 documentos públicos,
 com busca semântica (embeddings `multilingual-e5-large` + LanceDB) e síntese por
@@ -15,13 +15,15 @@ LLM com **citação obrigatória da fonte**.
 ## Arquitetura
 
 ```
-                                      REDE PRIVADA (VCN 10.0.0.0/24)
-Internet ──▶ VM pública (x86)  ─────────────────────────▶  VM do modelo (ARM)
-             :8000                                          :8100
-             ├─ chatbot (HTML)                               ├─ FastAPI /buscar /perguntar
-             ├─ FastAPI (orquestra)                          ├─ LanceDB (35.359 chunks)
-             └─ NVIDIA NIM (gpt-oss-120b)                    └─ multilingual-e5-large
-                                                             SEM porta aberta à internet
+              Tailscale Funnel              REDE PRIVADA (VCN 10.0.0.0/24)
+Internet ──HTTPS──▶ VM pública (x86)  ──────────────────▶  VM do modelo (ARM)
+                    127.0.0.1:8000                         10.0.0.78:8100
+                    ├─ chatbot (HTML)                      ├─ FastAPI /buscar /perguntar
+                    ├─ FastAPI (orquestra)                 ├─ LanceDB (35.359 chunks)
+                    └─ NVIDIA NIM (gpt-oss-120b)           └─ multilingual-e5-large
+
+                    SEM porta de entrada                   SEM porta aberta à internet
+                    (só o túnel WireGuard)                 (só a faixa da VCN)
 ```
 
 A **VM do modelo não é acessível pela internet**: não há regra de ingress para a
@@ -86,7 +88,7 @@ só entrega o `content` ao usuário e trata resposta vazia como falha, caindo pa
 
 ## Endpoints
 
-### API pública (VM x86, porta 8000)
+### API pública (VM x86, via Funnel em HTTPS)
 
 | Método | Rota | Descrição |
 |---|---|---|
@@ -97,7 +99,7 @@ só entrega o `content` ao usuário e trata resposta vazia como falha, caindo pa
 | `GET` | `/docs` | OpenAPI interativo |
 
 ```bash
-curl -X POST http://<IP-PUBLICO>:8000/perguntar \
+curl -X POST https://ufpr-rag.tail9f5159.ts.net/perguntar \
   -H 'Content-Type: application/json' \
   -d '{"pergunta":"qual o prazo máximo de um estágio obrigatório?"}'
 ```
@@ -168,10 +170,16 @@ docker save ufpr-rag-front | gzip > front.tar.gz
 scp front.tar.gz ubuntu@<IP-PUBLICO>:~
 ssh ubuntu@<IP-PUBLICO> 'gunzip -c front.tar.gz | docker load'
 ssh ubuntu@<IP-PUBLICO> 'docker run -d --name front --restart unless-stopped \
-  -p 8000:8000 --env-file ~/front.env ufpr-rag-front'
+  -p 127.0.0.1:8000:8000 --env-file ~/front.env ufpr-rag-front'
 ```
 
-Abrir **apenas a porta 8000** na security list da VCN.
+O bind em `127.0.0.1` é proposital: a publicação não é por porta aberta, e sim
+pelo Funnel (ver "HTTPS sem abrir porta"). **Nenhuma regra de ingress é criada
+para a aplicação.**
+
+```bash
+tailscale funnel --bg 8000
+```
 
 ---
 
@@ -213,25 +221,47 @@ Números de matrícula (GRR) **não** são removidos: são identificadores públ
   é a exclusão dos documentos), com validação de dígito verificador para não
   mascarar códigos numéricos legítimos.
 
+### HTTPS sem abrir porta
+
+A aplicação é publicada por **Tailscale Funnel**, não por porta aberta. O tráfego
+entra pelo túnel WireGuard que a própria VM estabelece de dentro para fora, então
+**não existe porta de entrada para a aplicação**. O certificado é Let's Encrypt
+real, emitido e renovado automaticamente para o domínio `ts.net`.
+
+```bash
+tailscale funnel --bg 8000     # publica em https://<host>.<tailnet>.ts.net
+tailscale funnel status
+```
+
+O container do front ficou ligado em `127.0.0.1:8000`: ele nem escuta na interface
+pública, e quem alcança a porta é só o `tailscaled`, no mesmo host. A configuração
+sobrevive a reinício (verificado com `systemctl restart tailscaled`).
+
+Essa decisão troca uma porta aberta com TLS por **nenhuma porta aberta**. A
+contrapartida honesta é uma dependência de terceiro: se o serviço da Tailscale
+sair do ar, a aplicação fica inacessível. Para um trabalho de disciplina, com
+`Always Free` dos dois lados, o ganho de superfície compensa.
+
 ### Superfície exposta
 
-O `scripts/harden_security_list.py` foi aplicado: a Security List saiu de 13 para
-6 regras de ingress. Varredura externa das duas VMs depois da mudança:
+O `scripts/harden_security_list.py` foi aplicado: a Security List saiu de **13
+para 5** regras de ingress. Varredura externa das duas VMs depois da mudança:
 
 | Máquina | Portas abertas à internet |
 |---|---|
 | VM do modelo (ARM) | `22` (SSH) e `8501` (outra aplicação, alheia a este projeto) |
-| VM pública (x86) | `22` (SSH) e `8000` (esta aplicação) |
+| VM pública (x86) | `22` (SSH) — **e mais nada** |
 
 Foram fechadas: `3000` (open-webui), `4000` (proxy de LLM, com chaves),
 `5432` (**PostgreSQL**), `5678` (n8n), `6333`/`6334` (qdrant), `8005`,
-`9443` (**Portainer**). Banco de dados e painel de controle do Docker abertos
-ao mundo são achados sérios por si só — nada disso precisava de acesso externo,
-já que o consumo é todo interno pela rede do Docker.
+`8000` (a própria aplicação, agora via Funnel) e `9443` (**Portainer**). Banco de
+dados e painel de controle do Docker abertos ao mundo são achados sérios por si
+só — nada disso precisava de acesso externo, já que o consumo é todo interno pela
+rede do Docker.
 
-Um resíduo exigiu atenção separada: a porta `8000` **precisa** continuar aberta
-(é a aplicação), mas o Portainer da outra VM também publicava a 8000 (túnel de
-Edge agent). Fechar pela Security List não resolveria sem derrubar a aplicação,
+Um resíduo exigiu atenção separada: enquanto a `8000` ainda precisava ficar aberta
+para a aplicação, o Portainer da outra VM também publicava a 8000 (túnel de Edge
+agent) e vinha junto de carona. Fechar pela Security List derrubaria a aplicação,
 então o Portainer foi recriado sem essa publicação e com a `9443` ligada a
 `127.0.0.1` — acessível só por túnel SSH:
 

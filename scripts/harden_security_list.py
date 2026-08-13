@@ -29,9 +29,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 # Portas que DEVEM continuar aceitando tráfego da internet.
+# A 8000 saiu daqui: o front passou a ser publicado por Tailscale Funnel
+# (https://<host>.<tailnet>.ts.net), que chega pelo túnel WireGuard e não
+# depende de nenhuma porta de entrada. O container tambḿ foi religado em
+# `127.0.0.1:8000`, então nem escuta na interface pública.
 MANTER_PUBLICAS = {
     22: "SSH",
-    8000: "front público do RAG",
     8501: "prodClass (Streamlit)",
 }
 # Portas que ficam acessíveis apenas dentro da VCN.
@@ -46,6 +49,7 @@ FECHAR = {
     5678: "n8n",
     6333: "qdrant",
     6334: "qdrant (gRPC)",
+    8000: "front do RAG (agora via Funnel) / Portainer edge",
     8005: "telegram-converter",
     9443: "Portainer",
 }
