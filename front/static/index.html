@@ -59,6 +59,14 @@
   .trecho .cab{font-size:.76rem;color:var(--muted);margin-bottom:6px;overflow-wrap:anywhere}
   .trecho .cab b{color:var(--fg)}
   .trecho .txt{font-size:.88rem;white-space:pre-wrap;overflow-wrap:anywhere}
+
+  /* Ressalva sobre a natureza do acervo — recolhida por padrão para não
+     empurrar o campo de pergunta para baixo da dobra. */
+  .aviso{border:1px solid var(--border);border-radius:8px;padding:10px 12px;
+         margin-top:18px;background:var(--src-bg);font-size:.82rem;color:var(--muted)}
+  .aviso summary{cursor:pointer;font-weight:600;color:var(--fg);font-size:.85rem}
+  .aviso p{margin:10px 0 0;line-height:1.5}
+  .aviso b{color:var(--fg)}
 </style>
 </head>
 <body>
@@ -91,6 +99,25 @@
            autocomplete="off" required>
     <button type="submit" id="btn">Perguntar</button>
   </form>
+
+  <details class="aviso">
+    <summary>⚠️ Limitação conhecida: as fontes se sobrepõem</summary>
+    <p>O acervo é normativo e vem de <b>instâncias deliberativas distintas</b>
+      (CEPE, COPLAD, COUN, CONCUR). Uma mesma matéria reaparece ao longo dos anos
+      como resolução, portaria que a retifica, alteração de outro conselho,
+      consolidação e revogação. Os textos ficam quase idênticos entre si; o que
+      muda é <b>qual está valendo</b>.</p>
+    <p>Na prática: a busca pode devolver várias versões da mesma norma, e a
+      resposta pode citar corretamente uma regra <b>já revogada</b> — porque o
+      trecho de uma norma revogada não diz que foi revogada, isso está em outro
+      documento. <b>Vigência não é propriedade do texto, é relação entre
+      documentos</b>, e busca por similaridade não representa relação.</p>
+    <p>No projeto de origem, esta base opera junto de um banco orientado a grafos
+      (Neo4j) que carrega justamente essas relações — revogação, alteração,
+      competência do órgão e histórico de implantação. <b>Aqui está publicada só
+      a metade vetorial</b>, então a limitação fica visível de propósito. O modo
+      <b>busca direta</b> mostra sem intermediação o que o índice devolveu.</p>
+  </details>
 
   <p class="hint">
     API: <code>POST /perguntar</code> (com IA) · <code>GET /buscar?q=</code> (sem IA) ·
