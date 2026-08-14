@@ -393,15 +393,15 @@ bloqueando o tráfego externo antes mesmo de chegar à máquina.
 pip install pytest && pytest -q     # 22 testes, ~0,3 s
 ```
 
-Cobrem as defesas, não o caminho feliz: recusa de injeção de SQL nos três
-filtros (incluindo `' OR 1=1 --` e `'; DROP TABLE`), separação entre as
-whitelists (um valor válido para `conselho` não passa como `tipo`),
-mascaramento de CPF com dígito verificador — inclusive o caso do código
-orçamentário que *parece* CPF e não deve ser mascarado, e do GRR que não é PII —
-e o rate limit: o bloqueio da rajada, a varredura que impede o dicionário de
-chaves de crescer sem limite, e as duas metades da identificação do cliente (o
-`X-Forwarded-For` é aceito vindo da bridge do Docker e ignorado quando o par da
-conexão é um endereço da internet, que poderia forjá-lo).
+Cobrem a recusa de injeção de SQL nos três filtros (incluindo `'OR 1=1 --` 
+e `'; DROP TABLE`), separação entre as whitelists (um valor válido para 
+`conselho` não passa como `tipo`), mascaramentode CPF com dígito verificador
+— inclusive o caso do código orçamentário que *parece* CPF e não deve ser 
+mascarado, e do GRR que não é PII —e o rate limit: o bloqueio da rajada, 
+a varredura que impede o dicionário de chaves de crescer sem limite, e 
+as duas metades da identificação do cliente (o`X-Forwarded-For` é aceito 
+vindo da bridge do Docker e ignorado quando o par da conexão é um endereço 
+da internet, que poderia forjá-lo).
 
 Rodam sem LanceDB, sem o modelo e sem rede: as dependências pesadas são
 importadas dentro dos métodos, então a lógica de validação é exercitável isolada.
