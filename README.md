@@ -283,7 +283,7 @@ O script reconstrói uma tabela nova contendo apenas os registros que ficam —
 em vez de `DELETE` sobre uma cópia, porque o delete do LanceDB é *soft* e as
 linhas removidas poderiam permanecer em fragmentos antigos. Ele remove os 9
 documentos de exemplo de estágio que continham dados pessoais reais (CPF, RG,
-nome, data de nascimento, que vieram de documentos ingeridos por engano) e **valida que nenhum CPF válido restou** — falha o
+nome, data de nascimento, de documentos ingeridos por engano) e **valida que nenhum CPF válido restou** — falha o
 build se restar. Nenhum conteúdo normativo é perdido.
 
 Números de matrícula (GRR) **não** são removidos: são identificadores públicos da UFPR.
@@ -296,7 +296,8 @@ Números de matrícula (GRR) **não** são removidos: são identificadores públ
   privado (`-p 10.0.0.78:8100:8100`) e a regra de ingress da porta 8100 tem origem
   `10.0.0.0/24`, não `0.0.0.0/0`. Verificado por fora: a porta é inalcançável da
   internet e alcançável apenas pela VM pública.
-- **Sem segredo no repositório** — `NVIDIA_API_KEY` só em `.env` na VM (versionado apenas o `.env.example`).
+- **Sem segredo no repositório** — `NVIDIA_API_KEY` só em `.env` na VM (versionado apenas o `.env.example`), 
+  que fora reaproveitada de deploy anterior.
 - **Filtros validados por whitelist** — os parâmetros `conselho`/`tipo`/`orgao` são
   conferidos contra um conjunto fechado antes de virarem cláusula `WHERE`, então
   entrada do usuário nunca é interpolada em SQL.
@@ -378,10 +379,13 @@ então o Portainer foi recriado sem essa publicação e com a `9443` ligada a
 ssh -L 9443:127.0.0.1:9443 ubuntu@<IP>   # depois: https://localhost:9443
 ```
 
-A lição é que **fechar por porta não basta quando dois serviços compartilham o
-número**; é preciso olhar quem escuta em cada máquina.
+Isolamento de Rede: A restrição de acesso à VM não foi feita via firewall do sistema
+operacional (iptables), pois o Docker manipula o roteamento de pacotes e pode ignorar 
+bloqueios locais em portas publicadas. Para garantir a segurança efetiva, o controle 
+foi implementado diretamente na camada de infraestrutura em nuvem (Security List da VCN), 
+bloqueando o tráfego externo antes mesmo de chegar à máquina.
 
----
+----
 
 ## Testes
 
@@ -402,22 +406,6 @@ conexão é um endereço da internet, que poderia forjá-lo).
 Rodam sem LanceDB, sem o modelo e sem rede: as dependências pesadas são
 importadas dentro dos métodos, então a lógica de validação é exercitável isolada.
 
-### Uma armadilha que vale registrar: iptables não fecha porta de container
-
-A tentativa inicial de restringir o acesso foi por `iptables` na cadeia `INPUT`.
-**Não funciona para portas publicadas pelo Docker.** Um `-p 8000:8000` é entregue
-por DNAT em `nat/PREROUTING`; como o destino passa a ser o IP do container, o
-pacote é *encaminhado* e percorre a cadeia **FORWARD**, nunca a `INPUT`. Uma
-regra de INPUT ali dá falsa sensação de segurança: a porta continua aberta.
-
-O controle efetivo é a **Security List da VCN** — é o que `scripts/harden_security_list.py`
-ajusta. Diagnóstico usado para provar isso: `tcpdump` na máquina de destino
-enquanto se tentava conectar da outra VM — nenhum pacote chegava, o que descarta
-o firewall do host e aponta para a camada de rede.
-
-Corolário do mesmo mecanismo: com `FORWARD` em política `DROP`, remover todos os
-containers faz o Docker perder suas regras de FORWARD, e portas publicadas param
-de responder mesmo com tudo "aberto". `systemctl restart docker` reconstrói.
 
 ---
 
